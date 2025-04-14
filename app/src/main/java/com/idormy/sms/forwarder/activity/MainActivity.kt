@@ -75,17 +75,9 @@ class MainActivity : BaseActivity<ActivityMainBinding?>(), DrawerAdapter.OnItemS
     private val POS_RULE = 1
     private val POS_SENDER = 2
     private val POS_SETTING = 3
-    private val POS_TASK = 5 //4为空行
-    private val POS_SERVER = 6
-    private val POS_CLIENT = 7
-    private val POS_FRPC = 8
-    private val POS_APPS = 9
-    private val POS_HELP = 11 //10为空行
-    private val POS_ABOUT = 12
     private var needToAppListFragment = false
 
     private lateinit var mTabLayout: TabLayout
-    private lateinit var mSlidingRootNav: SlidingRootNav
     private lateinit var mLLMenu: LinearLayout
     private lateinit var mMenuTitles: Array<String>
     private lateinit var mMenuIcons: Array<Drawable>
@@ -100,7 +92,6 @@ class MainActivity : BaseActivity<ActivityMainBinding?>(), DrawerAdapter.OnItemS
 
         initData()
         initViews()
-        initSlidingMenu(savedInstanceState)
 
         //不在最近任务列表中显示
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && SettingUtils.enableExcludeFromRecents) {
@@ -176,12 +167,6 @@ class MainActivity : BaseActivity<ActivityMainBinding?>(), DrawerAdapter.OnItemS
     private fun initData() {
         mMenuTitles = ResUtils.getStringArray(this, R.array.menu_titles)
         mMenuIcons = ResUtils.getDrawableArray(this, R.array.menu_icons)
-
-        //仅当开启自动检查且有网络时自动检查更新/获取提示
-        if (SettingUtils.autoCheckUpdate && NetworkUtils.isHaveInternet()) {
-            showTips(this)
-            XUpdateInit.checkUpdate(this, false, SettingUtils.joinPreviewProgram)
-        }
     }
 
     //按返回键不退出回到桌面
@@ -193,117 +178,13 @@ class MainActivity : BaseActivity<ActivityMainBinding?>(), DrawerAdapter.OnItemS
         startActivity(intent)
     }
 
-    fun openMenu() {
-        mSlidingRootNav.openMenu()
-    }
-
-    fun closeMenu() {
-        mSlidingRootNav.closeMenu()
-    }
-
-    fun isMenuOpen(): Boolean {
-        return mSlidingRootNav.isMenuOpened
-    }
-
-    private fun initSlidingMenu(savedInstanceState: Bundle?) {
-        mSlidingRootNav = SlidingRootNavBuilder(this).withGravity(if (ResUtils.isRtl(this)) SlideGravity.RIGHT else SlideGravity.LEFT).withMenuOpened(false).withContentClickableWhenMenuOpened(false).withSavedState(savedInstanceState).withMenuLayout(R.layout.menu_left_drawer).inject()
-        mLLMenu = mSlidingRootNav.layout.findViewById(R.id.ll_menu)
-        ViewUtils.setVisibility(mLLMenu, false)
-        mAdapter = DrawerAdapter(
-            mutableListOf(
-                createItemFor(POS_LOG).setChecked(true),
-                createItemFor(POS_RULE),
-                createItemFor(POS_SENDER),
-                createItemFor(POS_SETTING),
-                SpaceItem(15),
-                createItemFor(POS_TASK),
-                createItemFor(POS_SERVER),
-                createItemFor(POS_CLIENT),
-                createItemFor(POS_FRPC),
-                createItemFor(POS_APPS),
-                SpaceItem(15),
-                createItemFor(POS_HELP),
-                createItemFor(POS_ABOUT),
-            )
-        )
-        mAdapter.setListener(this)
-        val list: RecyclerView = findViewById(R.id.list)
-        list.isNestedScrollingEnabled = false
-        list.layoutManager = LinearLayoutManager(this)
-        list.adapter = mAdapter
-        mAdapter.setSelected(POS_LOG)
-        mSlidingRootNav.isMenuLocked = false
-        mSlidingRootNav.layout.addDragStateListener(object : DragStateListener {
-            override fun onDragStart() {
-                ViewUtils.setVisibility(mLLMenu, true)
-            }
-
-            override fun onDragEnd(isMenuOpened: Boolean) {
-                ViewUtils.setVisibility(mLLMenu, isMenuOpened)
-            }
-        })
-    }
-
     override fun onItemSelected(position: Int) {
         needToAppListFragment = false
         when (position) {
             POS_LOG, POS_RULE, POS_SENDER, POS_SETTING -> {
                 val tab = mTabLayout.getTabAt(position)
                 tab?.select()
-                mSlidingRootNav.closeMenu()
             }
-
-            POS_TASK -> openNewPage(TasksFragment::class.java)
-            POS_SERVER -> openNewPage(ServerFragment::class.java)
-            POS_CLIENT -> openNewPage(ClientFragment::class.java)
-            POS_FRPC -> {
-                if (App.FrpclibInited) {
-                    openNewPage(FrpcFragment::class.java)
-                    return
-                }
-
-                val title = if (!FileUtils.isFileExists(filesDir.absolutePath + "/libs/libgojni.so")) {
-                    String.format(getString(R.string.frpclib_download_title), FRPC_LIB_VERSION)
-                } else {
-                    getString(R.string.frpclib_version_mismatch)
-                }
-
-                MaterialDialog.Builder(this)
-                    .title(title)
-                    .content(R.string.download_frpc_tips)
-                    .positiveText(R.string.lab_yes)
-                    .negativeText(R.string.lab_no)
-                    .onPositive { _: MaterialDialog?, _: DialogAction? ->
-                        downloadFrpcLib()
-                    }
-                    .show()
-            }
-
-            POS_APPS -> {
-                //检查读取应用列表权限是否获取
-                XXPermissions.with(this).permission(Permission.GET_INSTALLED_APPS).request(object : OnPermissionCallback {
-                    override fun onGranted(permissions: MutableList<String>, allGranted: Boolean) {
-                        if (App.UserAppList.isEmpty() && App.SystemAppList.isEmpty()) {
-                            XToastUtils.info(getString(R.string.loading_app_list))
-                            val request = OneTimeWorkRequestBuilder<LoadAppListWorker>().build()
-                            WorkManager.getInstance(getContext()).enqueue(request)
-                            needToAppListFragment = true
-                            return
-                        }
-                        openNewPage(AppListFragment::class.java)
-                    }
-
-                    override fun onDenied(permissions: MutableList<String>, doNotAskAgain: Boolean) {
-                        XToastUtils.error(R.string.tips_get_installed_apps)
-                        if (doNotAskAgain) {
-                            XXPermissions.startPermissionActivity(getContext(), permissions)
-                        }
-                    }
-                })
-            }
-
-            POS_HELP -> AgentWebActivity.goWeb(this, getString(R.string.url_help))
-            POS_ABOUT -> openNewPage(AboutFragment::class.java)
         }
     }
 
@@ -314,69 +195,4 @@ class MainActivity : BaseActivity<ActivityMainBinding?>(), DrawerAdapter.OnItemS
             .withSelectedIconTint(ThemeUtils.getMainThemeColor(this))
             .withSelectedTextTint(ThemeUtils.getMainThemeColor(this))
     }
-
-    //动态加载FrpcLib
-    private fun downloadFrpcLib() {
-        val cpuAbi = when (Build.CPU_ABI) {
-            "x86" -> "x86"
-            "x86_64" -> "x86_64"
-            "arm64-v8a" -> "arm64-v8a"
-            else -> "armeabi-v7a"
-        }
-
-        val libPath = filesDir.absolutePath + "/libs"
-        val soFile = File(libPath)
-        if (!soFile.exists()) soFile.mkdirs()
-        val downloadUrl = String.format(FRPC_LIB_DOWNLOAD_URL, FRPC_LIB_VERSION, cpuAbi)
-        val mContext = this
-        val dialog: MaterialDialog = MaterialDialog.Builder(mContext)
-            .title(String.format(getString(R.string.frpclib_download_title), FRPC_LIB_VERSION))
-            .content(getString(R.string.frpclib_download_content))
-            .contentGravity(GravityEnum.CENTER)
-            .progress(false, 0, true)
-            .progressNumberFormat("%2dMB/%1dMB")
-            .build()
-
-        XHttp.downLoad(downloadUrl)
-            .ignoreHttpsCert()
-            .savePath(cacheDir.absolutePath)
-            .execute(object : DownloadProgressCallBack<String?>() {
-                override fun onStart() {
-                    dialog.show()
-                }
-
-                override fun onError(e: ApiException) {
-                    dialog.dismiss()
-                    XToastUtils.error(e.message.toString())
-                }
-
-                override fun update(bytesRead: Long, contentLength: Long, done: Boolean) {
-                    Log.d(TAG, "onProgress: bytesRead=$bytesRead, contentLength=$contentLength")
-                    dialog.maxProgress = (contentLength / 1048576L).toInt()
-                    dialog.setProgress((bytesRead / 1048576L).toInt())
-                }
-
-                override fun onComplete(srcPath: String) {
-                    dialog.dismiss()
-                    Log.d(TAG, "srcPath = $srcPath")
-
-                    val srcFile = File(srcPath)
-                    val destFile = File("$libPath/libgojni.so")
-                    FileUtils.moveFile(srcFile, destFile, null)
-
-                    MaterialDialog.Builder(this@MainActivity)
-                        .iconRes(R.drawable.ic_menu_frpc)
-                        .title(R.string.menu_frpc)
-                        .content(R.string.download_frpc_tips2)
-                        .cancelable(false)
-                        .positiveText(R.string.confirm)
-                        .onPositive { _: MaterialDialog?, _: DialogAction? ->
-                            restartApplication()
-                        }
-                        .show()
-                }
-            })
-
-    }
-
 }
